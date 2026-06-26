@@ -1,0 +1,3 @@
+*                       @nexus-mesh/core-maintainers
+/app/src/main/java/com/example/database/ @nexus-mesh/database-reviewers
+/app/src/main/java/com/example/          @nexus-mesh/android-reviewers

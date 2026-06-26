@@ -1,0 +1,16 @@
+name: Documentation Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy_docs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docs Index
+      run: |
+        echo "Building technical documentation page..."
+        cat README.md > docs_site.md

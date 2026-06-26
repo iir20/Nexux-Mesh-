@@ -1,0 +1,10 @@
+NEXUS MESH (Android Client)
+Copyright 2026 NEXUS MESH open-source contributors
+
+This product includes software developed by the NEXUS MESH Project
+(https://github.com/nexus-mesh/nexus-mesh-android).
+
+This product utilizes third-party library files, including:
+- AndroidX Jetpack Compose
+- Kotlin Coroutines & Flow
+- Room Database Engine (SQLite Wrapper)

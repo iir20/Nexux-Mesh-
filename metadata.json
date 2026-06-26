@@ -1,0 +1,6 @@
+{
+  "name": "Nexus Mesh",
+  "description": "Decentralized offline social network that runs 100% peer-to-peer using Bluetooth and Wi-Fi Direct without servers or cell infrastructure.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

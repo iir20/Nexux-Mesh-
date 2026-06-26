@@ -1,0 +1,8 @@
+build:
+  maxIssues: 0
+  excludeCorrectable: true
+
+complexity:
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 25
