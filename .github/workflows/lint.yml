@@ -26,3 +26,13 @@ jobs:
 
     - name: Run detekt Static Analysis
       run: ./gradlew detekt || true
+
+    - name: Upload ktlint/detekt Reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: lint-and-detekt-reports
+        path: |
+          app/build/reports/ktlint/
+          app/build/reports/detekt/
+          build/reports/detekt/

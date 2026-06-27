@@ -28,11 +28,28 @@ jobs:
       - name: Grant Execute Permission for Gradle
         run: chmod +x gradlew
 
-      - name: Decode Debug Keystore
-        run: base64 -d debug.keystore.base64 > debug.keystore || base64 --decode debug.keystore.base64 > debug.keystore
+      - name: Validate Release Secrets
+        run: |
+          if [ -z "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Missing RELEASE_KEYSTORE_BASE64 secret. Official release builds must be signed with a production keystore!"
+            exit 1
+          fi
+          if [ -z "${{ secrets.RELEASE_STORE_PASSWORD }}" ] || [ -z "${{ secrets.RELEASE_KEY_ALIAS }}" ] || [ -z "${{ secrets.RELEASE_KEY_PASSWORD }}" ]; then
+            echo "::error::Missing keystore passwords or alias secrets. Official release builds require RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD!"
+            exit 1
+          fi
 
-      - name: Build Android Packages (Debug & Release)
-        run: ./gradlew assembleDebug assembleRelease
+      - name: Decode Release Keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore || echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > app/release.keystore
+
+      - name: Build Android Packages (Debug, Signed Release APK & Signed AAB)
+        run: ./gradlew assembleDebug assembleRelease bundleRelease
+        env:
+          RELEASE_KEYSTORE_PATH: "release.keystore"
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: Stage Release Artifacts
         run: |
@@ -43,17 +60,54 @@ jobs:
             cp app/build/outputs/apk/debug/app-debug.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-debug.apk
           fi
           
-          # Stage Release APK (Can be unsigned or signed)
-          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
-            cp app/build/outputs/apk/release/app-release-unsigned.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-release-unsigned.apk
-          elif [ -f app/build/outputs/apk/release/app-release.apk ]; then
+          # Stage Signed Release APK
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
             cp app/build/outputs/apk/release/app-release.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-release.apk
+          elif [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-release-unsigned.apk
+          fi
+
+          # Stage Signed Release AAB (Android App Bundle)
+          if [ -f app/build/outputs/bundle/release/app-release.aab ]; then
+            cp app/build/outputs/bundle/release/app-release.aab staging-artifacts/nexus-mesh-${{ github.ref_name }}-release.aab
           fi
           
           echo "Staged Artifacts List:"
           ls -R staging-artifacts
 
-      - name: Create GitHub Release and Upload APK Assets
+      - name: Verify APK & AAB Signatures
+        run: |
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -r | head -n 1)
+          if [ -n "$APKSIGNER" ]; then
+            echo "Verifying Debug APK signature..."
+            $APKSIGNER verify --verbose staging-artifacts/nexus-mesh-${{ github.ref_name }}-debug.apk
+            
+            if [ -f staging-artifacts/nexus-mesh-${{ github.ref_name }}-release.apk ]; then
+              echo "Verifying Release APK signature..."
+              $APKSIGNER verify --verbose staging-artifacts/nexus-mesh-${{ github.ref_name }}-release.apk
+            fi
+          else
+            echo "apksigner not found, skipping signature verification step."
+          fi
+
+      - name: Generate SBOM (Software Bill of Materials)
+        uses: anchore/sbom-action@v0
+        with:
+          format: 'spdx-json'
+          output-file: 'staging-artifacts/nexus-mesh-${{ github.ref_name }}-sbom.spdx.json'
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          cd staging-artifacts
+          for file in *; do
+            if [ -f "$file" ]; then
+              sha256sum "$file" > "$file.sha256"
+            fi
+          done
+          echo "Generated Checksums:"
+          cat *.sha256
+
+      - name: Create GitHub Release and Upload Artifacts
         uses: softprops/action-gh-release@v2
         with:
           name: "Nexus Mesh ${{ github.ref_name }} - Offline Resilience Release"
@@ -64,7 +118,8 @@ jobs:
             
             ### 📦 Download Instructions:
             *   **`nexus-mesh-${{ github.ref_name }}-debug.apk`**: Recommended for instant physical off-grid testing. This APK is pre-signed and ready to install on your Android device right away.
-            *   **`nexus-mesh-${{ github.ref_name }}-release-unsigned.apk`**: Production release candidate. Must be signed with a production keystore (using `apksigner`) before installation on non-developer devices.
+            *   **`nexus-mesh-${{ github.ref_name }}-release.apk`**: Production release candidate. Signed with the official production release keystore.
+            *   **`nexus-mesh-${{ github.ref_name }}-release.aab`**: Production Android App Bundle, ready for uploading to Google Play Console.
             
             ### 🛡️ Features Included:
             1.  **Mesh Profile Customization**: High-fidelity personal theme profiles with custom avatar card, backup seed generation, import/export migration.
@@ -74,6 +129,7 @@ jobs:
             *No internet required. Build verified successfully.*
           draft: false
           prerelease: false
+          generate_release_notes: true
           files: staging-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
