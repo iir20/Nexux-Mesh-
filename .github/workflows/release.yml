@@ -23,10 +23,11 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Validate Release Secrets
         run: |
@@ -44,7 +45,7 @@ jobs:
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore || echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > app/release.keystore
 
       - name: Build Android Packages (Debug, Signed Release APK & Signed AAB)
-        run: ./gradlew assembleDebug assembleRelease bundleRelease
+        run: gradle assembleDebug assembleRelease bundleRelease
         env:
           RELEASE_KEYSTORE_PATH: "${{ github.workspace }}/app/release.keystore"
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}

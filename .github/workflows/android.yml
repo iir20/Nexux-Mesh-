@@ -17,13 +17,14 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
-    - name: Grant execute permission for gradle
-      run: chmod +x gradlew || true
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '9.3.1'
 
     - name: Run Room Schema Verification
-      run: ./gradlew :app:kspDebugKotlin || true
+      run: gradle :app:kspDebugKotlin || true
 
     - name: Build Debug & Unsigned Release APKs
-      run: ./gradlew assembleDebug assembleRelease
+      run: gradle assembleDebug assembleRelease
