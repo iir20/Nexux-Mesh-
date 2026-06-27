@@ -46,7 +46,7 @@ jobs:
       - name: Build Android Packages (Debug, Signed Release APK & Signed AAB)
         run: ./gradlew assembleDebug assembleRelease bundleRelease
         env:
-          RELEASE_KEYSTORE_PATH: "release.keystore"
+          RELEASE_KEYSTORE_PATH: "${{ github.workspace }}/app/release.keystore"
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
