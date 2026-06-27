@@ -17,6 +17,9 @@ jobs:
 
     - name: Grant execute permission for gradle
       run: chmod +x gradlew || true
+
+    - name: Decode Debug Keystore
+      run: base64 -d debug.keystore.base64 > debug.keystore || base64 --decode debug.keystore.base64 > debug.keystore
     
     - name: Run Security Audit Lint
       run: ./gradlew lintDebug || true
