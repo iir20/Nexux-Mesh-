@@ -26,3 +26,13 @@ class GreetingScreenshotTest {
     composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
   }
 }
+
+@androidx.compose.runtime.Composable
+fun Greeting(name: String) {
+  androidx.compose.material3.Text(
+    text = "Hello $name! Welcome to Nexus Mesh.",
+    color = androidx.compose.ui.graphics.Color.White,
+    style = androidx.compose.material3.MaterialTheme.typography.headlineMedium
+  )
+}
+
