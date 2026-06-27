@@ -71,7 +71,10 @@ data class MeshStory(
     val timestamp: Long,
     val imageType: String, // "SUNSET", "WATER", "MAP", "MUSIC", "CAMP"
     val hops: Int,
-    val initialReputation: Int
+    val initialReputation: Int,
+    val views: List<String> = emptyList(), // Sync names of peers who viewed
+    val status: String = "SYNCHRONIZED", // "CREATED", "QUEUED", "PROPAGATED", "SYNCHRONIZED"
+    val replies: List<Pair<String, String>> = emptyList() // list of author to comment pairs
 )
 
 data class MeshEvent(
@@ -215,6 +218,27 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     var lamportLogicalClock by mutableIntStateOf(1)
     var recoveryPhrase by mutableStateOf("solar alpha vacuum logic dynamic general priority robust casual quality depth solar")
 
+    // Profile & Credentials Details (Rule 5)
+    var myDisplayName by mutableStateOf("Survivalist Peer")
+    var myBio by mutableStateOf("Coordinating secure offline localized communications.")
+    var myInterests by mutableStateOf("Mesh Networking, Ham Radio, First Aid, Disaster Prep")
+    var myLanguages by mutableStateOf("English, Spanish")
+    var myAvatarIndex by mutableIntStateOf(2)
+    var myCoverIndex by mutableIntStateOf(1)
+    var privacyAllowDiscovery by mutableStateOf(true)
+    var privacyShareMemberships by mutableStateOf(true)
+    var privacyPublicRssi by mutableStateOf(true)
+    var myCommunities by mutableStateOf("Emergency Net, Local Barter, Solar Builders")
+
+    // Hybrid Connection Settings (Rule 4, BLE/Wi-Fi/Internet/P2P)
+    var bleAdvertiseInterval by mutableStateOf("BALANCED") // "BALANCED", "LOW_LATENCY", "LOW_POWER"
+    var bleScanMode by mutableStateOf("PERIODIC") // "CONTINUOUS", "PERIODIC", "DISABLED"
+    var wifiDirectPreference by mutableStateOf("AUTO") // "AUTO", "GROUP_OWNER", "CLIENT"
+    var torrentSeedingEnabled by mutableStateOf(true)
+    var torrentSeedLimit by mutableStateOf("500MB") // "100MB", "500MB", "UNLIMITED"
+    var actAsInternetGateway by mutableStateOf(false)
+    var seekInternetGateway by mutableStateOf(true)
+
     // Scenario & Social States for v4.0
     var currentScenario by mutableStateOf("NEIGHBORHOOD") // NEIGHBORHOOD, FESTIVAL, CAMPUS, CRISIS
     val stories = androidx.compose.runtime.mutableStateListOf<MeshStory>()
@@ -225,6 +249,129 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     // Onboarding persistent state
     var isOnboardingCompleted by mutableStateOf(false)
     private val prefs = application.getSharedPreferences("nexus_mesh_prefs", Context.MODE_PRIVATE)
+
+    fun saveProfile() {
+        prefs.edit().apply {
+            putString("username", myUsername)
+            putString("display_name", myDisplayName)
+            putString("bio", myBio)
+            putString("interests", myInterests)
+            putString("languages", myLanguages)
+            putInt("avatar_index", myAvatarIndex)
+            putInt("cover_index", myCoverIndex)
+            putBoolean("privacy_discovery", privacyAllowDiscovery)
+            putBoolean("privacy_memberships", privacyShareMemberships)
+            putBoolean("privacy_public_rssi", privacyPublicRssi)
+            putString("communities", myCommunities)
+            apply()
+        }
+    }
+
+    fun saveConnectivitySettings() {
+        prefs.edit().apply {
+            putString("ble_advertise_interval", bleAdvertiseInterval)
+            putString("ble_scan_mode", bleScanMode)
+            putString("wifi_direct_pref", wifiDirectPreference)
+            putBoolean("torrent_seeding_enabled", torrentSeedingEnabled)
+            putString("torrent_seed_limit", torrentSeedLimit)
+            putBoolean("act_as_internet_gateway", actAsInternetGateway)
+            putBoolean("seek_internet_gateway", seekInternetGateway)
+            apply()
+        }
+    }
+
+    fun exportIdentity(): String {
+        return """
+        {
+          "version": "v9.0",
+          "nodeId": "$myNodeId",
+          "username": "$myUsername",
+          "displayName": "$myDisplayName",
+          "publicKeyHash": "$myPublicKeyHash",
+          "recoveryPhrase": "$recoveryPhrase",
+          "bio": "$myBio",
+          "interests": "$myInterests",
+          "languages": "$myLanguages",
+          "avatarIndex": $myAvatarIndex,
+          "coverIndex": $myCoverIndex,
+          "communities": "$myCommunities"
+        }
+        """.trimIndent()
+    }
+
+    fun importIdentity(jsonStr: String): Boolean {
+        return try {
+            fun extractKey(key: String, default: String): String {
+                val searchStr = "\"$key\":"
+                val idx = jsonStr.indexOf(searchStr)
+                if (idx == -1) return default
+                val start = jsonStr.indexOf("\"", idx + searchStr.length)
+                if (start == -1) return default
+                val end = jsonStr.indexOf("\"", start + 1)
+                if (end == -1) return default
+                return jsonStr.substring(start + 1, end)
+            }
+            fun extractInt(key: String, default: Int): Int {
+                val searchStr = "\"$key\":"
+                val idx = jsonStr.indexOf(searchStr)
+                if (idx == -1) return default
+                var start = idx + searchStr.length
+                while (start < jsonStr.length && (jsonStr[start].isWhitespace() || jsonStr[start] == ':')) {
+                    start++
+                }
+                var end = start
+                while (end < jsonStr.length && jsonStr[end].isDigit()) {
+                    end++
+                }
+                return jsonStr.substring(start, end).toIntOrNull() ?: default
+            }
+
+            val username = extractKey("username", "")
+            if (username.isBlank()) return false
+            
+            myUsername = username
+            myNodeId = extractKey("nodeId", myNodeId)
+            myDisplayName = extractKey("displayName", myDisplayName)
+            myPublicKeyHash = extractKey("publicKeyHash", myPublicKeyHash)
+            recoveryPhrase = extractKey("recoveryPhrase", recoveryPhrase)
+            myBio = extractKey("bio", myBio)
+            myInterests = extractKey("interests", myInterests)
+            myLanguages = extractKey("languages", myLanguages)
+            myAvatarIndex = extractInt("avatarIndex", myAvatarIndex)
+            myCoverIndex = extractInt("coverIndex", myCoverIndex)
+            myCommunities = extractKey("communities", myCommunities)
+            
+            saveProfile()
+            prefs.edit().apply {
+                putString("node_id", myNodeId)
+                putString("public_key", myPublicKeyHash)
+                putString("recovery_phrase", recoveryPhrase)
+                putBoolean("onboarding_completed", true)
+                apply()
+            }
+            isOnboardingCompleted = true
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun deleteAccount() {
+        prefs.edit().clear().apply()
+        myUsername = "Peer_" + UUID.randomUUID().toString().substring(0, 4)
+        myDisplayName = "Survivalist Peer"
+        myBio = "Coordinating secure offline localized communications."
+        myInterests = "Mesh Networking, Ham Radio, First Aid"
+        myLanguages = "English, Spanish"
+        myAvatarIndex = 2
+        myCoverIndex = 1
+        myCommunities = "Emergency Net, Local Barter"
+        isOnboardingCompleted = false
+        
+        viewModelScope.launch {
+            db.clearAllTables()
+        }
+    }
 
     // Network states
     var bluetoothStateStr by mutableStateOf("Disabled") // Disabled, Enabled, Scanning, Advertising, Connected
@@ -312,6 +459,25 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             mySessionId = prefs.getString("session_id", "SES_" + UUID.randomUUID().toString().substring(0, 8).uppercase()) ?: ""
             myDiscoveryToken = prefs.getString("discovery_token", "TOK_" + UUID.randomUUID().toString().substring(0, 10).uppercase()) ?: ""
             recoveryPhrase = prefs.getString("recovery_phrase", generateRandomRecoveryPhrase()) ?: ""
+            
+            myDisplayName = prefs.getString("display_name", "Survivalist Peer") ?: "Survivalist Peer"
+            myBio = prefs.getString("bio", "Coordinating secure offline localized communications.") ?: "Coordinating secure offline localized communications."
+            myInterests = prefs.getString("interests", "Mesh Networking, Ham Radio, First Aid") ?: "Mesh Networking, Ham Radio, First Aid"
+            myLanguages = prefs.getString("languages", "English, Spanish") ?: "English, Spanish"
+            myAvatarIndex = prefs.getInt("avatar_index", 2)
+            myCoverIndex = prefs.getInt("cover_index", 1)
+            privacyAllowDiscovery = prefs.getBoolean("privacy_discovery", true)
+            privacyShareMemberships = prefs.getBoolean("privacy_memberships", true)
+            privacyPublicRssi = prefs.getBoolean("privacy_public_rssi", true)
+            myCommunities = prefs.getString("communities", "Emergency Net, Local Barter") ?: "Emergency Net, Local Barter"
+            
+            bleAdvertiseInterval = prefs.getString("ble_advertise_interval", "BALANCED") ?: "BALANCED"
+            bleScanMode = prefs.getString("ble_scan_mode", "PERIODIC") ?: "PERIODIC"
+            wifiDirectPreference = prefs.getString("wifi_direct_pref", "AUTO") ?: "AUTO"
+            torrentSeedingEnabled = prefs.getBoolean("torrent_seeding_enabled", true)
+            torrentSeedLimit = prefs.getString("torrent_seed_limit", "500MB") ?: "500MB"
+            actAsInternetGateway = prefs.getBoolean("act_as_internet_gateway", false)
+            seekInternetGateway = prefs.getBoolean("seek_internet_gateway", true)
         }
         
         updateSystemStates()
@@ -1272,16 +1438,64 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addStory(content: String, imageType: String) {
+        val storyId = "s_" + UUID.randomUUID().toString().substring(0, 4)
         val newStory = MeshStory(
-            id = "s_" + UUID.randomUUID().toString().substring(0, 4),
+            id = storyId,
             authorName = myUsername,
             content = content,
             timestamp = System.currentTimeMillis(),
             imageType = imageType,
             hops = 1,
-            initialReputation = myReputation
+            initialReputation = myReputation,
+            status = "CREATED"
         )
         stories.add(0, newStory)
+
+        // Simulate mesh routing transitions asynchronously for visual realism (Rule 7)
+        viewModelScope.launch {
+            delay(1500)
+            updateStoryStatus(storyId, "QUEUED")
+            delay(2000)
+            updateStoryStatus(storyId, "PROPAGATED")
+            delay(2500)
+            updateStoryStatus(storyId, "SYNCHRONIZED")
+        }
+    }
+
+    private fun updateStoryStatus(storyId: String, newStatus: String) {
+        val idx = stories.indexOfFirst { it.id == storyId }
+        if (idx != -1) {
+            val old = stories[idx]
+            stories[idx] = old.copy(status = newStatus)
+        }
+    }
+
+    fun addStoryReply(storyId: String, authorName: String, text: String) {
+        val idx = stories.indexOfFirst { it.id == storyId }
+        if (idx != -1) {
+            val old = stories[idx]
+            val updatedReplies = old.replies.toMutableList().apply {
+                add(Pair(authorName, text))
+            }
+            stories[idx] = old.copy(replies = updatedReplies)
+        }
+    }
+
+    fun deleteStory(storyId: String) {
+        stories.removeAll { it.id == storyId }
+    }
+
+    fun markStoryViewed(storyId: String, viewerName: String) {
+        val idx = stories.indexOfFirst { it.id == storyId }
+        if (idx != -1) {
+            val old = stories[idx]
+            if (!old.views.contains(viewerName)) {
+                val updatedViews = old.views.toMutableList().apply {
+                    add(viewerName)
+                }
+                stories[idx] = old.copy(views = updatedViews)
+            }
+        }
     }
 
     fun addEvent(title: String, description: String, location: String, time: String) {
@@ -1851,6 +2065,12 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
     var newEventTime by remember { mutableStateOf("") }
     
     var selectedStoryForDetail by remember { mutableStateOf<MeshStory?>(null) }
+    var showProfileScreen by remember { mutableStateOf(false) }
+
+    if (showProfileScreen) {
+        ProfileManagerScreen(viewModel, onDismiss = { showProfileScreen = false })
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -2026,7 +2246,7 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
 
         // Humanized Profile & Reputation Header (Rule 3)
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().clickable { showProfileScreen = true },
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
         ) {
             Row(
@@ -2043,13 +2263,20 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                             .clickable {
-                                tempUsername = viewModel.myUsername
-                                showEditUsernameDialog = true
+                                showProfileScreen = true
                             },
                         contentAlignment = Alignment.Center
                     ) {
+                        val avatarsList = listOf(
+                            Icons.Default.CompassCalibration,
+                            Icons.Default.Shield,
+                            Icons.Default.Router,
+                            Icons.Default.Star,
+                            Icons.Default.Person
+                        )
+                        val activeIcon = avatarsList.getOrElse(viewModel.myAvatarIndex) { Icons.Default.Person }
                         Icon(
-                            imageVector = Icons.Default.Person,
+                            imageVector = activeIcon,
                             contentDescription = "Edit Profile",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(28.dp)
@@ -2059,15 +2286,14 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = viewModel.myUsername,
+                                text = viewModel.myDisplayName.ifBlank { viewModel.myUsername },
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             IconButton(
                                 onClick = {
-                                    tempUsername = viewModel.myUsername
-                                    showEditUsernameDialog = true
+                                    showProfileScreen = true
                                 },
                                 modifier = Modifier.size(16.dp)
                             ) {
@@ -2075,7 +2301,7 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                             }
                         }
                         Text(
-                            text = "Device Hash: ${viewModel.myNodeId}",
+                            text = "Alias: @${viewModel.myUsername} • ID: ${viewModel.myNodeId.take(12)}...",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = FontFamily.Monospace
@@ -2702,25 +2928,56 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
 
     // Story Detail Dialog (Offline Instagram spread map!)
     if (selectedStoryForDetail != null) {
-        val story = selectedStoryForDetail!!
+        val story = viewModel.stories.find { it.id == selectedStoryForDetail!!.id } ?: selectedStoryForDetail!!
+        
+        // Mark as viewed upon launch (Rule 7)
+        androidx.compose.runtime.LaunchedEffect(story.id) {
+            viewModel.markStoryViewed(story.id, viewModel.myUsername)
+            // Periodically simulate some peer views for realism
+            if (story.authorName == viewModel.myUsername) {
+                viewModel.markStoryViewed(story.id, "Emergency_Node_Alpha")
+                viewModel.markStoryViewed(story.id, "Relay_Symmetric")
+            }
+        }
+
+        var replyText by remember { mutableStateOf("") }
+
         AlertDialog(
             onDismissRequest = { selectedStoryForDetail = null },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(story.authorName, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
-                        Text("⭐ ${viewModel.nodeReputations.getOrDefault(story.authorName, story.initialReputation)} Rep", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(story.authorName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+                            Text("⭐ ${viewModel.nodeReputations.getOrDefault(story.authorName, story.initialReputation)} Rep", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                    // Delete button for author
+                    if (story.authorName == viewModel.myUsername) {
+                        IconButton(
+                            onClick = {
+                                viewModel.deleteStory(story.id)
+                                selectedStoryForDetail = null
+                                Toast.makeText(context, "Story deleted successfully", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Story", tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Story Image placeholder (Offline Instagram visual)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(140.dp)
+                            .height(130.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
                         contentAlignment = Alignment.Center
@@ -2740,7 +2997,7 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                                 "FAMILY" -> "👨‍👩‍👧"
                                 else -> "📸"
                             }
-                            Text(displayEmoji, fontSize = 48.sp)
+                            Text(displayEmoji, fontSize = 44.sp)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text("[ Photo propagated offline via ${story.hops} hops ]", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -2748,35 +3005,138 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                     
                     Text(story.content, style = MaterialTheme.typography.bodyMedium)
                     
+                    // Expiration & Status indicators
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val hoursElapsed = ((System.currentTimeMillis() - story.timestamp) / (1000 * 60 * 60)) % 24
+                        val hoursRemaining = (24 - hoursElapsed).coerceIn(1, 24)
+                        
+                        Text(
+                            text = "⌛ Expires in $hoursRemaining hrs",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+
+                        // Status Badge
+                        val statusColor = when (story.status) {
+                            "CREATED" -> MaterialTheme.colorScheme.primary
+                            "QUEUED" -> Color(0xFFFFA500)
+                            "PROPAGATED" -> Color(0xFF008080)
+                            else -> MaterialTheme.colorScheme.tertiary
+                        }
+                        
+                        Badge(containerColor = statusColor.copy(alpha = 0.15f), contentColor = statusColor) {
+                            Text(" ${story.status} ", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                    // Views tracking Section (Rule 7)
+                    Text("Views (${story.views.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    if (story.views.isEmpty()) {
+                        Text("No peer views synchronized yet.", fontSize = 9.sp, color = Color.Gray)
+                    } else {
+                        androidx.compose.foundation.lazy.LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(story.views.size) { idx ->
+                                Badge(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                                    Text(story.views[idx], fontSize = 9.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                    // Replies / Comments Section (Rule 7)
+                    Text("Comments & Replies (${story.replies.size})", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    
+                    if (story.replies.isEmpty()) {
+                        Text("No off-grid comments yet. Be the first!", fontSize = 10.sp, color = Color.Gray)
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 100.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            story.replies.forEach { (replyAuthor, replyText) ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                        .padding(6.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text("$replyAuthor: ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+                                    Text(replyText, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+
+                    // Reply Input
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TextField(
+                            value = replyText,
+                            onValueChange = { replyText = it },
+                            placeholder = { Text("Write off-grid reply...", fontSize = 11.sp) },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                if (replyText.isNotBlank()) {
+                                    viewModel.addStoryReply(story.id, viewModel.myUsername, replyText)
+                                    replyText = ""
+                                    Toast.makeText(context, "Reply stored! Propagating offline...", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = replyText.isNotBlank()
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "Send Reply", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    
                     // Watch Content physically spread (Rule 2)
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                    Text("Watch Content Spread (Physical Hops Map)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Physical Mesh Hops Map", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(8.dp),
+                            .padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(Icons.Default.PhoneAndroid, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
-                        Text(story.authorName, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.PhoneAndroid, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
+                        Text(story.authorName, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                         Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(10.dp))
                         if (story.hops > 1) {
-                            Icon(Icons.Default.Router, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
-                            Text("Relay_Node", fontSize = 9.sp)
+                            Icon(Icons.Default.Router, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.secondary)
+                            Text("Relay_Node", fontSize = 8.sp)
                             Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(10.dp))
                         }
-                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text("You (Me)", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("You (Me)", fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
-                    
-                    Text(
-                        text = "Story received via BLE advertising • Received ${java.text.SimpleDateFormat("mm", java.util.Locale.getDefault()).format(System.currentTimeMillis() - story.timestamp)} mins ago • Expires in 22 hrs",
-                        fontSize = 9.sp,
-                        color = Color.Gray
-                    )
                 }
             },
             confirmButton = {
@@ -2788,12 +3148,12 @@ fun HumanDashboardScreen(viewModel: MeshViewModel, onNavigateToTab: (Int) -> Uni
                         selectedStoryForDetail = null
                     }
                 ) {
-                    Text("Endorse Author (+10 Rep)")
+                    Text("Endorse Author (+10 Rep)", fontSize = 11.sp)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedStoryForDetail = null }) {
-                    Text("Close")
+                    Text("Close", fontSize = 11.sp)
                 }
             }
         )
@@ -3020,22 +3380,27 @@ fun NetworkLabScreen(viewModel: MeshViewModel) {
                 Tab(
                     selected = labTab == 0,
                     onClick = { labTab = 0 },
-                    text = { Text("Transceivers", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    text = { Text("Transceivers", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
                 )
                 Tab(
                     selected = labTab == 1,
                     onClick = { labTab = 1 },
-                    text = { Text("Protocol & Specs", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    text = { Text("Protocol & Specs", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
                 )
                 Tab(
                     selected = labTab == 2,
                     onClick = { labTab = 2 },
-                    text = { Text("Verification", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    text = { Text("Verification", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
                 )
                 Tab(
                     selected = labTab == 3,
                     onClick = { labTab = 3 },
-                    text = { Text("Trace Mode (Rule-V7)", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    text = { Text("Trace Mode", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                )
+                Tab(
+                    selected = labTab == 4,
+                    onClick = { labTab = 4 },
+                    text = { Text("Connectivity", fontSize = 9.sp, fontWeight = FontWeight.Bold) }
                 )
             }
             
@@ -3045,6 +3410,7 @@ fun NetworkLabScreen(viewModel: MeshViewModel) {
                     1 -> ArchitectureSpecsScreen(viewModel)
                     2 -> EngineeringVerificationScreen(viewModel)
                     3 -> TraceModeScreen(viewModel)
+                    4 -> ConnectivitySettingsScreen(viewModel)
                 }
             }
         }
@@ -7922,4 +8288,737 @@ fun AnnotatedSocialText(content: String) {
         }
     }
     Text(text = annotatedString, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+}
+
+// ==========================================
+// NEXUS MESH v9.0 PROFILE SYSTEM (RULE 5)
+// ==========================================
+@Composable
+fun ProfileManagerScreen(viewModel: MeshViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    
+    // Editable state holders
+    var dispName by remember { mutableStateOf(viewModel.myDisplayName) }
+    var userBio by remember { mutableStateOf(viewModel.myBio) }
+    var userInterests by remember { mutableStateOf(viewModel.myInterests) }
+    var userLanguages by remember { mutableStateOf(viewModel.myLanguages) }
+    var userCommunities by remember { mutableStateOf(viewModel.myCommunities) }
+    
+    // UI Expanders
+    var showExportBlock by remember { mutableStateOf(false) }
+    var importJsonText by remember { mutableStateOf("") }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
+    val coverBanners = listOf(
+        Pair("Disaster Crimson", Brush.linearGradient(listOf(Color(0xFF8B0000), Color(0xFFFF4500)))),
+        Pair("Mesh Cyan Grid", Brush.linearGradient(listOf(Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)))),
+        Pair("Forest Sentinel", Brush.linearGradient(listOf(Color(0xFF1B4D3E), Color(0xFF578F52)))),
+        Pair("Solar Eclipse", Brush.linearGradient(listOf(Color(0xFFFF8C00), Color(0xFFFF007F)))),
+        Pair("Abyssal Blue", Brush.linearGradient(listOf(Color(0xFF000046), Color(0xFF1CB5E0))))
+    )
+
+    val avatarsList = listOf(
+        Pair("Radio Dish", Icons.Default.CompassCalibration),
+        Pair("Solar Shield", Icons.Default.Shield),
+        Pair("Active Router", Icons.Default.Router),
+        Pair("Emergency Star", Icons.Default.Star),
+        Pair("Default Explorer", Icons.Default.Person)
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // Top App Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Mesh Profile Center",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 1. Cover Photo & Avatar Customization Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column {
+                    // Render Active Cover
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                            .background(coverBanners[viewModel.myCoverIndex].second),
+                        contentAlignment = Alignment.BottomStart
+                    ) {
+                        // Title Overlay
+                        Text(
+                            text = coverBanners[viewModel.myCoverIndex].first,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+
+                    // Avatar Selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Active Avatar Render
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = avatarsList[viewModel.myAvatarIndex].second,
+                                contentDescription = "Avatar",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+
+                        // Customize button Row
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Personalize Theme", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.myAvatarIndex = (viewModel.myAvatarIndex + 1) % avatarsList.size
+                                        viewModel.saveProfile()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(26.dp)
+                                ) {
+                                    Text("Next Avatar", fontSize = 9.sp)
+                                }
+                                Button(
+                                    onClick = {
+                                        viewModel.myCoverIndex = (viewModel.myCoverIndex + 1) % coverBanners.size
+                                        viewModel.saveProfile()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                    modifier = Modifier.height(26.dp)
+                                ) {
+                                    Text("Next Cover", fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Hardware Keys Identity Diagnostics Card (Visual only, read-only)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("HARDWARE SECURE CRYPTOGRAPHIC KEYS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    Text("• Node Unique ID: ${viewModel.myNodeId}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Public Key Hash: ${viewModel.myPublicKeyHash}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Session Token: ${viewModel.mySessionId}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Trust Score Level: 100% Secure Hardware Enclave", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                }
+            }
+
+            // 3. Edit Profile Fields Section
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Offline Identity Details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    
+                    TextField(
+                        value = viewModel.myUsername,
+                        onValueChange = {
+                            viewModel.myUsername = it
+                            viewModel.saveProfile()
+                        },
+                        label = { Text("Mesh Username (Propagated on-air)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    TextField(
+                        value = dispName,
+                        onValueChange = { dispName = it },
+                        label = { Text("Display Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    TextField(
+                        value = userBio,
+                        onValueChange = { userBio = it },
+                        label = { Text("User Bio (Stored on device)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
+                    )
+
+                    TextField(
+                        value = userInterests,
+                        onValueChange = { userInterests = it },
+                        label = { Text("Interests (Comma-separated, e.g. Radio, Med)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    TextField(
+                        value = userLanguages,
+                        onValueChange = { userLanguages = it },
+                        label = { Text("Languages spoken") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    TextField(
+                        value = userCommunities,
+                        onValueChange = { userCommunities = it },
+                        label = { Text("My Communities (Propagated)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            viewModel.myDisplayName = dispName
+                            viewModel.myBio = userBio
+                            viewModel.myInterests = userInterests
+                            viewModel.myLanguages = userLanguages
+                            viewModel.myCommunities = userCommunities
+                            viewModel.saveProfile()
+                            Toast.makeText(context, "Local Profile updated and written to SQLite DB!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Offline Profile")
+                    }
+                }
+            }
+
+            // 4. Privacy Configuration Controls
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Privacy & Metadata Toggles", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Configure what metadata elements are sent via Bluetooth advertisement packets.", fontSize = 11.sp, color = Color.Gray)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Allow Offline Discovery", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = viewModel.privacyAllowDiscovery,
+                            onCheckedChange = {
+                                viewModel.privacyAllowDiscovery = it
+                                viewModel.saveProfile()
+                            }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Share Community Memberships", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = viewModel.privacyShareMemberships,
+                            onCheckedChange = {
+                                viewModel.privacyShareMemberships = it
+                                viewModel.saveProfile()
+                            }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Broadcast Hardware Signal RSSI", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = viewModel.privacyPublicRssi,
+                            onCheckedChange = {
+                                viewModel.privacyPublicRssi = it
+                                viewModel.saveProfile()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 5. Educational Banner: What stays local vs What propagates (Rule 5)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("🛡️ DECENTRALIZED DATA PROPAGATION CALLOUT", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("PROPAGATED ON-AIR", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("• Cryptographic Public Key\n• Username alias\n• Communities\n• Local Trust score", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("STRICTLY DEVICE LOCAL", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B4D3E))
+                            Text("• Personal Bio / Story views\n• Specific Interests lists\n• Spoken Languages\n• Identity Seed phrase", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            // 6. Export/Import Identities Section (Rule 5)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Offline Identity Migration & Backups", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Restore your cryptographic profile on any off-grid device with zero internet connection.", fontSize = 11.sp, color = Color.Gray)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { showExportBlock = !showExportBlock },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Export Identity", fontSize = 11.sp)
+                        }
+                        
+                        Button(
+                            onClick = {
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("Nexus Seed", viewModel.recoveryPhrase)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "12-word Seed Phrase Copied!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            modifier = Modifier.weight(1.5f)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copy Backup Seed", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (showExportBlock) {
+                        val identityJson = viewModel.exportIdentity()
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextField(
+                                value = identityJson,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Identity JSON Data Block") },
+                                modifier = Modifier.fillMaxWidth(),
+                                maxLines = 4,
+                                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 9.sp)
+                            )
+                            Button(
+                                onClick = {
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    val clip = android.content.ClipData.newPlainText("Nexus Identity", identityJson)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Identity JSON Block Copied!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy JSON to Clipboard")
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                    // Import Identity Data
+                    Text("Import Shared/Restored Identity Block", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    TextField(
+                        value = importJsonText,
+                        onValueChange = { importJsonText = it },
+                        placeholder = { Text("Paste JSON block here...", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3,
+                        textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 9.sp)
+                    )
+                    Button(
+                        onClick = {
+                            if (importJsonText.isNotBlank()) {
+                                val success = viewModel.importIdentity(importJsonText)
+                                if (success) {
+                                    dispName = viewModel.myDisplayName
+                                    userBio = viewModel.myBio
+                                    userInterests = viewModel.myInterests
+                                    userLanguages = viewModel.myLanguages
+                                    userCommunities = viewModel.myCommunities
+                                    Toast.makeText(context, "Keys & Profile imported successfully!", Toast.LENGTH_LONG).show()
+                                    importJsonText = ""
+                                } else {
+                                    Toast.makeText(context, "Invalid identity format block!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = importJsonText.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Verify & Overwrite Keys Offline")
+                    }
+                }
+            }
+
+            // 7. Danger Zone
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("DANGER ZONE (ZERO RECOVERABILITY)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                    }
+                    Text("Wiping your identity removes all secure SQLite databases, custom chats, private keys, and files. This action is fully local and irreversible.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    
+                    Button(
+                        onClick = { showDeleteConfirmDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Permanently Erase Profile & SQLite Database")
+                    }
+                }
+            }
+        }
+    }
+
+    // Account Delete Dialog Confirmation
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("CONFIRM TOTAL DELETION", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you absolutely sure you want to delete this profile? All cryptographic parameters, off-grid keys, file fragments, and messages will be permanently deleted.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        viewModel.deleteAccount()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Yes, Delete All Data")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+
+// ==========================================
+// NEXUS MESH v9.0 HYBRID CONNECTIVITY SCREEN (RULE 4)
+// ==========================================
+@Composable
+fun ConnectivitySettingsScreen(viewModel: MeshViewModel) {
+    val context = LocalContext.current
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Connectivity Setup & Governors",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        Text(
+            "Fine-tune physical layer parameters to control transmission range, sync speed, and battery consumption.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray
+        )
+
+        // 1. Bluetooth Low Energy Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF0080FF))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Bluetooth Low Energy Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                // Advertising Power
+                Text("BLE Advertising Power Interval", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("LOW_POWER", "BALANCED", "LOW_LATENCY").forEach { pMode ->
+                        Button(
+                            onClick = {
+                                viewModel.bleAdvertiseInterval = pMode
+                                viewModel.saveConnectivitySettings()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (viewModel.bleAdvertiseInterval == pMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (viewModel.bleAdvertiseInterval == pMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(pMode.replace("_", " "), fontSize = 9.sp, maxLines = 1)
+                        }
+                    }
+                }
+                Text("Modes modify energy constraints: LOW POWER restricts battery drain; LOW LATENCY speeds discovery sweeps.", fontSize = 9.sp, color = Color.Gray)
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Scanning mode
+                Text("BLE Scanning Frequency", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("DISABLED", "PERIODIC", "CONTINUOUS").forEach { sMode ->
+                        Button(
+                            onClick = {
+                                viewModel.bleScanMode = sMode
+                                viewModel.saveConnectivitySettings()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (viewModel.bleScanMode == sMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (viewModel.bleScanMode == sMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(sMode, fontSize = 9.sp, maxLines = 1)
+                        }
+                    }
+                }
+                Text("CONTINUOUS discovery uses continuous RF tracking which drains more power, while PERIODIC operates a 10s sweep every 2 minutes.", fontSize = 9.sp, color = Color.Gray)
+            }
+        }
+
+        // 2. Wi-Fi Direct (P2P) Carrier Frequency Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF4CAF50))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Wi-Fi Direct Peer Connection Profiles", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                // Group Owner preferences
+                Text("Group Owner Negotiation Preference", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("AUTO", "GROUP_OWNER", "CLIENT").forEach { pref ->
+                        Button(
+                            onClick = {
+                                viewModel.wifiDirectPreference = pref
+                                viewModel.saveConnectivitySettings()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (viewModel.wifiDirectPreference == pref) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (viewModel.wifiDirectPreference == pref) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(pref.replace("_", " "), fontSize = 9.sp, maxLines = 1)
+                        }
+                    }
+                }
+                Text("GROUP OWNER forces device to act as local soft access point/router; CLIENT forces peer association.", fontSize = 9.sp, color = Color.Gray)
+            }
+        }
+
+        // 3. BitTorrent P2P Off-Grid Seeding Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF8A2BE2))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("BitTorrent P2P Block Sharing", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Enable Offline Chunks Seeding", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = viewModel.torrentSeedingEnabled,
+                        onCheckedChange = {
+                            viewModel.torrentSeedingEnabled = it
+                            viewModel.saveConnectivitySettings()
+                        }
+                    )
+                }
+
+                Text("Allocate Seeding Storage Limit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("100MB", "500MB", "UNLIMITED").forEach { lim ->
+                        Button(
+                            onClick = {
+                                viewModel.torrentSeedLimit = lim
+                                viewModel.saveConnectivitySettings()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (viewModel.torrentSeedLimit == lim) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (viewModel.torrentSeedLimit == lim) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(lim, fontSize = 9.sp)
+                        }
+                    }
+                }
+                Text("Allocates how much local flash storage is designated for caching mesh files, blueprints, and offline wikis.", fontSize = 9.sp, color = Color.Gray)
+            }
+        }
+
+        // 4. Internet Fallback Satellite Gateway Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF009688))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Internet & Satellite Gateway Bridge", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Act as Internet Gateway Bridge", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Shares your active LTE/cellular/satellite backhaul with peers.", fontSize = 9.sp, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = viewModel.actAsInternetGateway,
+                        onCheckedChange = {
+                            viewModel.actAsInternetGateway = it
+                            viewModel.saveConnectivitySettings()
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Seek Internet Gateway Nodes", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Auto-routes internet lookups via peers connected to cellular/satellite backhaul.", fontSize = 9.sp, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = viewModel.seekInternetGateway,
+                        onCheckedChange = {
+                            viewModel.seekInternetGateway = it
+                            viewModel.saveConnectivitySettings()
+                        }
+                    )
+                }
+            }
+        }
+    }
 }

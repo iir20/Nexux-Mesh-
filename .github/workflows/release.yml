@@ -5,18 +5,72 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   package:
+    name: Build & Publish Release Assets
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Compile and Obfuscate Release Bundle
-      run: ./gradlew bundleRelease || true
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission for Gradle
+        run: chmod +x gradlew
+
+      - name: Build Android Packages (Debug & Release)
+        run: ./gradlew assembleDebug assembleRelease
+
+      - name: Stage Release Artifacts
+        run: |
+          mkdir -p staging-artifacts
+          
+          # Stage Debug APK (Pre-signed by Android build system, fully runnable on physical devices)
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-debug.apk
+          fi
+          
+          # Stage Release APK (Can be unsigned or signed)
+          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-release-unsigned.apk
+          elif [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk staging-artifacts/nexus-mesh-${{ github.ref_name }}-release.apk
+          fi
+          
+          echo "Staged Artifacts List:"
+          ls -R staging-artifacts
+
+      - name: Create GitHub Release and Upload APK Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Nexus Mesh ${{ github.ref_name }} - Offline Resilience Release"
+          body: |
+            ## Nexus Mesh ${{ github.ref_name }} — Production Release
+            
+            Welcome to the secure, fully implementable off-grid communications release!
+            
+            ### 📦 Download Instructions:
+            *   **`nexus-mesh-${{ github.ref_name }}-debug.apk`**: Recommended for instant physical off-grid testing. This APK is pre-signed and ready to install on your Android device right away.
+            *   **`nexus-mesh-${{ github.ref_name }}-release-unsigned.apk`**: Production release candidate. Must be signed with a production keystore (using `apksigner`) before installation on non-developer devices.
+            
+            ### 🛡️ Features Included:
+            1.  **Mesh Profile Customization**: High-fidelity personal theme profiles with custom avatar card, backup seed generation, import/export migration.
+            2.  **Hybrid Connectivity Control Panel**: Power intervals for BLE, Wifi-Direct owner negotiations, offline peer cache seed parameters, and satellite-internet fallbacks.
+            3.  **Offline Story Engine v2**: Views tracking, relative expiration countdown, publishing status pipelines, and localized comments/replies.
+            
+            *No internet required. Build verified successfully.*
+          draft: false
+          prerelease: false
+          files: staging-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
