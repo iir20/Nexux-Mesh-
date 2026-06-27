@@ -38,7 +38,22 @@ data class MeshMessageEntity(
     val lamportClock: Int = 0,
     val hops: Int = 0,
     val isEmergency: Boolean = false,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    
+    // NEXUS MESH v8.0 Rich Chat Extensions
+    val replyToId: String? = null,
+    val replyToSenderName: String? = null,
+    val replyToContent: String? = null,
+    val reactionsJson: String? = null, // JSON structure mapping users to reaction emojis
+    val isEdited: Boolean = false,
+    val isDeleted: Boolean = false,
+    val isStarred: Boolean = false,
+    val isPinned: Boolean = false,
+    val attachmentType: String? = null, // "IMAGE", "VIDEO", "FILE", "VOICE", "APK", "AUDIO", "ZIP"
+    val attachmentPath: String? = null,
+    val attachmentName: String? = null,
+    val attachmentSize: String? = null,
+    val voiceDurationSec: Int = 0
 )
 
 @Entity(tableName = "marketplace_listings")
