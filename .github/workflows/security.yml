@@ -26,7 +26,7 @@ jobs:
     - name: Dependency Check Scan
       uses: dependency-check/Dependency-Check_Action@main
       env:
-        JAVA_HOME: ""
+        JAVA_HOME: /opt/jdk
       with:
         project: 'NEXUS MESH'
         format: 'HTML'
