@@ -31,7 +31,7 @@ jobs:
         project: 'NEXUS MESH'
         format: 'HTML'
         out: 'reports'
-        args: '--scan app/build.gradle.kts'
+        args: '--exclude gradle/wrapper/gradle-wrapper.jar'
 
     - name: Upload Security and Dependency Check Reports
       if: always()
