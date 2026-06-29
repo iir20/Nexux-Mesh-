@@ -47,7 +47,7 @@ android {
       if (releaseConfig != null) {
         signingConfig = releaseConfig
       } else {
-        signingConfig = null
+        signingConfig = signingConfigs.getByName("debug")
       }
     }
     debug {

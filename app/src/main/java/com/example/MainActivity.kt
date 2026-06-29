@@ -50,6 +50,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.example.database.*
+import com.example.network.MeshNetworkEngine
+import android.util.Log
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -121,6 +123,7 @@ class MainActivity : ComponentActivity() {
 class MeshViewModel(application: Application) : AndroidViewModel(application) {
     private val db = MeshDatabase.getDatabase(application)
     private val repository = MeshRepository(db.meshDao())
+    val meshEngine = MeshNetworkEngine(application, repository, viewModelScope)
 
     val nodes = repository.allNodes.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
@@ -265,6 +268,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             putString("communities", myCommunities)
             apply()
         }
+        syncEngineState()
     }
 
     fun saveConnectivitySettings() {
@@ -278,6 +282,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             putBoolean("seek_internet_gateway", seekInternetGateway)
             apply()
         }
+        syncEngineState()
     }
 
     fun exportIdentity(): String {
@@ -350,6 +355,12 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
                 apply()
             }
             isOnboardingCompleted = true
+            meshEngine.nodeId = myNodeId
+            meshEngine.username = myUsername
+            meshEngine.batteryPercent = batteryPercent
+            meshEngine.activeMode = activeMode
+            meshEngine.isInternetGatewayEnabled = actAsInternetGateway
+            meshEngine.start()
             true
         } catch (e: Exception) {
             false
@@ -357,6 +368,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteAccount() {
+        meshEngine.stop()
         prefs.edit().clear().apply()
         myUsername = "Peer_" + UUID.randomUUID().toString().substring(0, 4)
         myDisplayName = "Survivalist Peer"
@@ -438,6 +450,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         isAppInBackground = true
         bluetoothDetailedStatus = "Background Mode - Scanning Paused"
         wifiP2pDetailedStatus = "Background Mode - Peer Discovery Paused"
+        meshEngine.stop()
     }
 
     fun onAppForegrounded() {
@@ -448,9 +461,33 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             startBleScan(context)
             discoverWifiP2pPeers(context)
         }
+        if (isOnboardingCompleted) {
+            meshEngine.start()
+        }
     }
 
     init {
+        meshEngine.onPeerDiscovered = { pId, pName, rssi ->
+            // Log real discovered peer
+        }
+        meshEngine.onConnectionStateChanged = { pId, state ->
+            peerConnectionStates[pId] = state
+            connectionEvents.add(
+                ConnectionEvent(
+                    id = UUID.randomUUID().toString(),
+                    timestamp = getFormattedTime(),
+                    peerId = pId,
+                    peerName = nodes.value.find { it.deviceId == pId }?.name ?: pId,
+                    eventType = state,
+                    details = "Real P2P session state with peer transitioned to $state."
+                )
+            )
+        }
+        meshEngine.onLogMessage = { log ->
+            Log.d("MeshEngine", log)
+        }
+        meshEngine.localStoriesReference = stories
+
         isOnboardingCompleted = prefs.getBoolean("onboarding_completed", false)
         if (isOnboardingCompleted) {
             myUsername = prefs.getString("username", "Peer_" + UUID.randomUUID().toString().substring(0, 4)) ?: ""
@@ -478,6 +515,14 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
             torrentSeedLimit = prefs.getString("torrent_seed_limit", "500MB") ?: "500MB"
             actAsInternetGateway = prefs.getBoolean("act_as_internet_gateway", false)
             seekInternetGateway = prefs.getBoolean("seek_internet_gateway", true)
+
+            // Setup real networking state
+            meshEngine.nodeId = myNodeId
+            meshEngine.username = myUsername
+            meshEngine.batteryPercent = batteryPercent
+            meshEngine.activeMode = activeMode
+            meshEngine.isInternetGatewayEnabled = actAsInternetGateway
+            meshEngine.start()
         }
         
         updateSystemStates()
@@ -518,6 +563,21 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         recoveryPhrase = words
         isOnboardingCompleted = true
         updateSystemStates()
+
+        meshEngine.nodeId = myNodeId
+        meshEngine.username = myUsername
+        meshEngine.batteryPercent = batteryPercent
+        meshEngine.activeMode = activeMode
+        meshEngine.isInternetGatewayEnabled = actAsInternetGateway
+        meshEngine.start()
+    }
+
+    fun syncEngineState() {
+        meshEngine.nodeId = myNodeId
+        meshEngine.username = myUsername
+        meshEngine.batteryPercent = batteryPercent
+        meshEngine.activeMode = activeMode
+        meshEngine.isInternetGatewayEnabled = actAsInternetGateway
     }
 
     fun generateRandomRecoveryPhrase(): String {
@@ -1279,6 +1339,9 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         transferStatus = "Initiating bulk Wi-Fi Direct file transport..."
         chunkingStatusMessage = "Initiating bulk Wi-Fi Direct file transport protocol..."
         
+        // Generate real 100 MB test file and chunks in the background for Phase 3 physical P2P transfer
+        meshEngine.generateAndRegister100MbTestFile()
+        
         val chunkStartTime = System.currentTimeMillis()
         viewModelScope.launch {
             lastFileTransferDurationMs = System.currentTimeMillis() - chunkStartTime
@@ -1997,7 +2060,7 @@ fun HeaderBar(viewModel: MeshViewModel) {
     ) {
         Column {
             Text(
-                text = "NEXUS MESH v5.1",
+                text = "NEXUS MESH v10.0",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
@@ -2011,6 +2074,26 @@ fun HeaderBar(viewModel: MeshViewModel) {
                     color = MaterialTheme.colorScheme.secondary
                 )
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            val unifiedStatus = viewModel.meshEngine.unifiedStatus
+            val badgeColor = when (unifiedStatus) {
+                "Connected" -> Color(0xFF2E7D32)
+                "Synchronizing" -> Color(0xFFEF6C00)
+                "Delivered" -> Color(0xFF00C853)
+                else -> Color(0xFF37474F)
+            }
+            androidx.compose.material3.Badge(
+                containerColor = badgeColor,
+                contentColor = Color.White,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
+                Text(
+                    text = "  $unifiedStatus  ",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(2.dp)
+                )
+            }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -5911,35 +5994,21 @@ fun EngineeringVerificationScreen(viewModel: MeshViewModel) {
                 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val bleScanSec = if (viewModel.lastBleScanDurationMs > 0) {
-                            String.format("%.1fs", viewModel.lastBleScanDurationMs / 1000.0)
-                        } else {
-                            "N/A"
-                        }
-                        val dbQueryTime = if (viewModel.lastDbQueryTimeMs > 0) {
-                            "${viewModel.lastDbQueryTimeMs} ms"
-                        } else {
-                            "0 ms"
-                        }
-                        val fileTransferSec = if (viewModel.lastFileTransferDurationMs > 0) {
-                            String.format("%.1fs", viewModel.lastFileTransferDurationMs / 1000.0)
-                        } else {
-                            "N/A"
-                        }
-                        BenchmarkItem("BLE Scan Event (Measured)", bleScanSec, "Duration of last scanned node payload")
-                        BenchmarkItem("SQLite Query (Measured)", dbQueryTime, "Duration of actual Room DAO node count")
-                        BenchmarkItem("Wi-Fi Bulk Transfer (Measured)", fileTransferSec, "Duration of last completed chunk transfer")
-                        BenchmarkItem("Max Carrier Bandwidth", "2.4 Mbps", "Wi-Fi Direct Physical Limit")
+                        BenchmarkItem("Connected Neighbors", "${viewModel.meshEngine.connectedNeighborsCount} active", "Active direct neighbors")
+                        BenchmarkItem("Active Relay Sessions", "${viewModel.meshEngine.activeRelaySessionsCount} sessions", "Active transit relay routes")
+                        BenchmarkItem("Routing Table Size", "${viewModel.meshEngine.routingTableSize} routes", "Destinations currently mapped")
+                        BenchmarkItem("Forwarded Packets", "${viewModel.meshEngine.forwardedPacketsCount} pkts", "Packets routed for other devices")
+                        BenchmarkItem("Queued Packets", "${viewModel.meshEngine.queuedPacketsCount} pkts", "Packets awaiting routing transit")
+                        BenchmarkItem("Dropped Packets", "${viewModel.meshEngine.droppedPacketsCount} pkts", "Pruned due to TTL/Hop limits")
+                        BenchmarkItem("Duplicate Suppressed", "${viewModel.meshEngine.duplicatePacketsPreventedCount} pkts", "Loops intercepted by unique key")
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BenchmarkItem("Battery Burn Rate", if (viewModel.isCharging) "+0.35%/min" else when (viewModel.activeMode) {
-                            "Cluster Leader" -> "-0.85%/min"
-                            "Relay Node" -> "-0.45%/min"
-                            else -> "-0.15%/min"
-                        }, "Based on active transceiver states")
-                        BenchmarkItem("Local Database Size", "${String.format("%.2f", viewModel.dbSizeGb * 1024.0)} MB", "Room SQLite Persistence on-disk")
-                        BenchmarkItem("CPU Footprint", "7.8% Avg", "BLE scan + logical clock tick")
-                        BenchmarkItem("RAM Allocation", "124 MB", "Heap allocation in background")
+                        BenchmarkItem("Average Round Trip Time", "${viewModel.meshEngine.averageRoundTripTimeMs} ms", "Avg ping delay of connections")
+                        BenchmarkItem("Synchronization Queue", "${viewModel.meshEngine.synchronizationQueueSize} pending", "Unsynchronized local database records")
+                        BenchmarkItem("Measured Transfer Speed", "${String.format("%.1f KB/s", viewModel.meshEngine.transferSpeedBps / 1024.0)}", "Speed of last synchronization run")
+                        BenchmarkItem("Battery Impact Rate", "${String.format("-%.2f%%/min", viewModel.meshEngine.batteryImpactPercentPerMin)}", "Calculated on current transceiver modes")
+                        BenchmarkItem("Database File Size", "${String.format("%.2f MB", viewModel.meshEngine.databaseSizeMb)}", "Room persistent SQLite on-disk size")
+                        BenchmarkItem("Current Active Transport", viewModel.meshEngine.currentTransport, "Preferred medium of transmission")
                     }
                 }
             }
