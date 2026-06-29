@@ -20,8 +20,13 @@ jobs:
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v4
       with:
-        gradle-version: '9.3.1'
         validate-wrappers: false
+
+    - name: Decode Debug Keystore
+      run: |
+        if [ -f debug.keystore.base64 ]; then
+          base64 -d debug.keystore.base64 > debug.keystore || base64 --decode debug.keystore.base64 > debug.keystore
+        fi
     
     - name: Run Security Audit Lint
       run: ./gradlew lintDebug || true
