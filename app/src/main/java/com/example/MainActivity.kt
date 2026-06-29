@@ -569,6 +569,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun benchmarkBleScan(context: Context, onResult: (String) -> Unit) {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = bluetoothManager?.adapter
@@ -697,6 +698,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun startBleScan(context: Context) {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = bluetoothManager?.adapter
@@ -768,6 +770,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun startBleAdvertising(context: Context) {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = bluetoothManager?.adapter
@@ -805,6 +808,7 @@ class MeshViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun discoverWifiP2pPeers(context: Context) {
         val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
         if (manager == null) {
