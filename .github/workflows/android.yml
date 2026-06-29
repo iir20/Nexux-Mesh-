@@ -33,7 +33,7 @@ jobs:
         fi
 
     - name: Run Room Schema Verification
-      run: ./gradlew :app:kspDebugKotlin || true
+      run: gradle :app:kspDebugKotlin || true
 
     - name: Build Debug & Unsigned Release APKs
-      run: ./gradlew assembleDebug assembleRelease
+      run: gradle assembleDebug assembleRelease

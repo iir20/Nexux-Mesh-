@@ -23,10 +23,10 @@ jobs:
         validate-wrappers: false
 
     - name: Run ktlint Check
-      run: ./gradlew ktlintCheck || true
+      run: gradle ktlintCheck || true
 
     - name: Run detekt Static Analysis
-      run: ./gradlew detekt || true
+      run: gradle detekt || true
 
     - name: Upload ktlint/detekt Reports
       if: always()

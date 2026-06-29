@@ -54,7 +54,7 @@ jobs:
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore || echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > app/release.keystore
 
       - name: Build Android Packages (Debug, Signed Release APK & Signed AAB)
-        run: ./gradlew assembleDebug assembleRelease bundleRelease
+        run: gradle assembleDebug assembleRelease bundleRelease
         env:
           RELEASE_KEYSTORE_PATH: "${{ github.workspace }}/app/release.keystore"
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
