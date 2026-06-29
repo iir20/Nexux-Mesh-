@@ -12,6 +12,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Make Gradle executable
+      run: chmod +x gradlew
+    
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
@@ -25,7 +28,7 @@ jobs:
         validate-wrappers: false
 
     - name: Run Room Schema Verification
-      run: gradle :app:kspDebugKotlin || true
+      run: ./gradlew :app:kspDebugKotlin || true
 
     - name: Build Debug & Unsigned Release APKs
-      run: gradle assembleDebug assembleRelease
+      run: ./gradlew assembleDebug assembleRelease

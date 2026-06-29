@@ -8,6 +8,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Make Gradle executable
+      run: chmod +x gradlew
+    
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
@@ -21,10 +24,10 @@ jobs:
         validate-wrappers: false
 
     - name: Run ktlint Check
-      run: gradle ktlintCheck || true
+      run: ./gradlew ktlintCheck || true
 
     - name: Run detekt Static Analysis
-      run: gradle detekt || true
+      run: ./gradlew detekt || true
 
     - name: Upload ktlint/detekt Reports
       if: always()
